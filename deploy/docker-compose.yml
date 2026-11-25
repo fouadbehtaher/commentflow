@@ -1,0 +1,22 @@
+# PRIVATE, UNTESTED (real n8n / Docker never run here). CommentFlow n8n + Caddy HTTPS.
+# Secrets come from root-only files under /etc/commentflow (mode 600), written by setup.sh, never from this repo.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: /etc/commentflow/domain.env
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data"]
+    depends_on: [n8n]
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.49.6   # current "stable" on docs.n8n.io on 2026-11-25; CLI flags below NOT verified against this build
+    restart: unless-stopped
+    env_file: [/etc/commentflow/domain.env, /etc/commentflow/n8n.env]
+    environment:
+      - N8N_PROTOCOL=https
+      - N8N_PROXY_HOPS=1
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false     # needed only for META_APP_SECRET and WEBHOOK_VERIFY_TOKEN; dedicated instance
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      - GENERIC_TIMEZONE=Africa/Cairo
+    volumes: ["n8n_data:/home/node/.n8n"]
+volumes: {caddy_data: {}, n8n_data: {}}

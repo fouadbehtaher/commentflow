@@ -1,0 +1,6 @@
+{$DOMAIN} {
+  # only Meta's two webhook paths are public; the n8n editor is not exposed
+  @hooks path /webhook/commentflow-ig /webhook/commentflow-fb
+  reverse_proxy @hooks n8n:5678
+  respond "not found" 404
+}

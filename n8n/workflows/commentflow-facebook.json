@@ -118,7 +118,7 @@
         "respondWith": "text",
         "responseBody": "ok",
         "options": {
-          "responseCode": "200"
+          "responseCode": 200
         }
       },
       "id": "35cead9e-228c-5740-a641-e8f3ea1de034",
@@ -135,7 +135,7 @@
         "respondWith": "text",
         "responseBody": "unauthorized",
         "options": {
-          "responseCode": "401"
+          "responseCode": 401
         }
       },
       "id": "c4e0f954-b1a6-5c4a-84d8-e376c42a7294",

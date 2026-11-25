@@ -1,6 +1,6 @@
 # CommentFlow
 
-> **Status: offline-tested only.** The workflows have not been run in real n8n and have not been tested against live Meta. The Instagram follow gate (an "I followed" button in the private reply) is a design that is untested live; Meta does not document whether the button shows in a private reply that lands in Requests. Facebook has no documented follow check, so follow-gated rules are blocked there.
+> **Status: tested on a real n8n 2.49.6 against fake services only.** The workflows (credential variant, via the n8n CLI import path) passed the 16 acceptance checks on a local n8n 2.49.6 (Node 24) with fake Graph/Notion/Supabase servers. Not tested: live Meta, Docker/Caddy/HTTPS, a hosted server. The Instagram follow gate (an "I followed" button in the private reply) is a design that is untested live; Meta does not document whether the button shows in a private reply that lands in Requests. Facebook has no documented follow check, so follow-gated rules are blocked there.
 
 **Two ways to run it**: n8n workflows for Instagram and Facebook (`n8n/`), and a standalone Python service for Instagram (`commentflow/`). Both read the same Notion rules and log to Supabase.
 
@@ -9,7 +9,7 @@
 
 - Instagram: signed webhook, rule match (post + keyword), Supabase dedupe, public reply (random of 3), private reply. With "Require follow", the private reply carries an "I followed" button; the follow state is read only after the tap (Meta gives no follow data for a comment alone).
 - Facebook: same flow, but Meta documents no follow check for Pages, so a rule with "Require follow" is blocked and logged, and nothing is sent.
-- Tests: `n8n/acceptance/run_emulated.sh` runs the real workflow JSON and Code-node JS through a small emulator against fake Graph/Notion/Supabase servers (17 checks). `run_acceptance.sh` does the same inside real n8n (Node 22+, about 3 GB RAM to install). Neither is a live Meta test.
+- Tests: `n8n/acceptance/run_emulated.sh` runs the real workflow JSON and Code-node JS through a small emulator against fake Graph/Notion/Supabase servers (16 checks). `run_acceptance.sh` does the same inside real n8n; `run_real_n8n.sh` does it with the credential variant through the CLI import path. n8n 2.49.6 needs Node 24 or newer; with pnpm the install worked on a 2 GB machine (about 600 MB RAM while running). The emulator once hid a real bug (status codes as strings), so prefer the real-n8n run. Neither is a live Meta test.
 
 ---
 

@@ -45,7 +45,7 @@ def iff(w, name, expr, pos=None):
         "combinator": "and"}, "options": {}}, 2, pos)
 
 
-def respond(w, name, body, code_="200", pos=None):
+def respond(w, name, body, code_=200, pos=None):
     return w.add(name, "n8n-nodes-base.respondToWebhook",
                  {"respondWith": "text", "responseBody": body,
                   "options": {"responseCode": code_}}, 1.1, pos)
@@ -81,8 +81,8 @@ def entry(w, platform_path):
     w.x = 260
     v = code(w, "Verify signature", "verify.js")
     i = iff(w, "Signature ok", "={{ $json.ok }}")
-    ok = respond(w, "OK 200", "ok", "200", [780, 200])
-    bad = respond(w, "Unauthorized 401", "unauthorized", "401", [780, 420])
+    ok = respond(w, "OK 200", "ok", 200, [780, 200])
+    bad = respond(w, "Unauthorized 401", "unauthorized", 401, [780, 420])
     w.x = 1040
     return p, v, i, ok, bad
 

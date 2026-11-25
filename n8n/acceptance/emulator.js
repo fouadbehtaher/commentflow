@@ -33,6 +33,10 @@ async function runFlow(wf, startNode, items, raw, respond) {
       const input = { first: () => ({ json: item, binary: { data: {} } }), all: () => [{ json: item }] };
       const r = await fn.call({ helpers }, input, dollar, process.env, require);
       outs = [(r || []).map(i => i.json)];
+    } else if (t === 'set') {
+      const o = n.parameters.includeOtherFields ? { ...item } : {};
+      for (const a of n.parameters.assignments.assignments) o[a.name] = await expr(a.value, ctx);
+      outs = [[o]];
     } else if (t === 'if') {
       const c = n.parameters.conditions.conditions[0];
       const v = await expr(c.leftValue, ctx);
@@ -43,6 +47,11 @@ async function runFlow(wf, startNode, items, raw, respond) {
     } else if (t === 'httpRequest') {
       const p = n.parameters; const h = { 'Content-Type': 'application/json' };
       for (const hp of (p.headerParameters || {}).parameters || []) h[hp.name] = await expr(hp.value, ctx);
+      if (p.authentication === 'genericCredentialType') {   // Header Auth credential, supplied via CRED_MAP in tests
+        const c = JSON.parse(process.env.CRED_MAP || '{}')[((n.credentials || {})[p.genericAuthType] || {}).name];
+        if (!c) throw new Error('credential not provided for ' + n.name);
+        h[c.name] = c.value;
+      }
       const opts = { method: p.method, headers: h };
       if (p.sendBody) opts.body = JSON.stringify(await expr(p.jsonBody, ctx));
       try {

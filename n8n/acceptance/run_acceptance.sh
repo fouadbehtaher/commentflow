@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Needs: Node >= 22 with n8n installed (npm i n8n), python3. Fully offline; no Meta/Notion/Supabase account.
+# Needs: Node >= 24 (n8n 2.49.6 refuses 22) with n8n installed (npm i n8n), python3. Fully offline; no Meta/Notion/Supabase account.
 set -euo pipefail
 cd "$(dirname "$0")"
 N8N_BIN="${N8N_BIN:-n8n}"

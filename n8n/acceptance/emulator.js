@@ -1,6 +1,6 @@
 // Minimal n8n workflow emulator. Runs the REAL generated workflow JSON (Code node JS, expressions,
 // IF routing, HTTP node params, connections) and serves /webhook/<path> like n8n does.
-// It is NOT n8n: use it when n8n cannot be installed (needs ~3GB RAM to install). Real n8n: run_acceptance.sh.
+// It is NOT n8n: use it when n8n cannot be installed (npm needs ~3GB RAM; pnpm worked in 2GB). Real n8n: run_acceptance.sh.
 const http = require('http'), fs = require('fs'), path = require('path');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const wfs = process.argv.slice(2).map(f => JSON.parse(fs.readFileSync(f, 'utf8')));

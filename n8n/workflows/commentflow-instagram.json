@@ -1,0 +1,752 @@
+{
+  "name": "CommentFlow - Instagram",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "commentflow-ig",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "730d9af3-42e9-569e-963a-ba12a1589b4c",
+      "name": "Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "210edbb8-6618-57b2-bb3e-6c1b6caa41f6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $input.first().json.query || {};\nconst good = q['hub.mode'] === 'subscribe' && $env.WEBHOOK_VERIFY_TOKEN && q['hub.verify_token'] === $env.WEBHOOK_VERIFY_TOKEN;\nreturn [{ json: { ok: !!good, challenge: good ? String(q['hub.challenge'] || '') : 'forbidden' } }];\n"
+      },
+      "id": "aea60509-14d2-5b72-9d81-758b26dc47ad",
+      "name": "Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 403 }}"
+        }
+      },
+      "id": "8d4fde34-b922-53df-b888-0c61073d2e2e",
+      "name": "Respond challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "commentflow-ig",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "ea6ce8ba-ee8f-5a69-8874-646a44c1eeb5",
+      "name": "Meta events (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "6172f652-e195-5061-a3a8-c76af7b26b0d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify X-Hub-Signature-256 on the raw body, then flatten the payload into events.\nconst crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst sig = headers['x-hub-signature-256'] || '';\nconst secret = $env.META_APP_SECRET || '';\nlet raw;\nif (item.binary && item.binary.data) {\n  raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n} else {\n  raw = Buffer.from(JSON.stringify(item.json.body || {}));\n}\nconst mac = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\nconst a = Buffer.from(mac), b = Buffer.from(sig);\nconst ok = !!secret && a.length === b.length && crypto.timingSafeEqual(a, b);\nlet body = {};\ntry { body = JSON.parse(raw.toString('utf8')); } catch (e) { return [{ json: { ok: false } }]; }\nif (!ok) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, body } }];\n"
+      },
+      "id": "73ae4b28-a531-5c10-bd1b-0efc5e4c544b",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7a58063b-da46-5866-997f-f0fe199eac9c",
+      "name": "Signature ok",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {
+          "responseCode": "200"
+        }
+      },
+      "id": "c36754c5-3fea-5440-a0d3-ef8aea13e3ae",
+      "name": "OK 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "unauthorized",
+        "options": {
+          "responseCode": "401"
+        }
+      },
+      "id": "874e84b9-b030-57dc-a9cb-f63fb1667c75",
+      "name": "Unauthorized 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten Instagram webhook payload into comment and button-tap events.\nconst body = $input.first().json.body || {};\nconst ig = $env.IG_ID || '';\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const ch of entry.changes || []) {\n    if (ch.field !== 'comments') continue;\n    const v = ch.value || {};\n    const from = v.from || {};\n    if (!v.id || from.id === ig) continue;           // ignore own comments (loop guard)\n    out.push({ json: { kind: 'comment', comment_id: v.id, text: v.text || '', igsid: from.id || '', username: from.username || '', media_id: (v.media || {}).id || '' } });\n  }\n  for (const ev of entry.messaging || []) {\n    const igsid = (ev.sender || {}).id || '';\n    if (igsid === ig) continue;\n    const payload = (((ev.message || {}).quick_reply || {}).payload) || ((ev.postback || {}).payload) || '';\n    if (payload.startsWith('CF_FOLLOWED:')) out.push({ json: { kind: 'tap', igsid, rule_id: payload.slice(12) } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "1057d39d-549d-5123-af32-7926e72fb457",
+      "name": "Split events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind === 'comment' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d157be34-d44c-5f00-a12c-e4d0171efed6",
+      "name": "Is comment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.IG_GRAPH_BASE }}/{{ $json.media_id }}?fields=permalink",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.IG_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "d5119403-34ed-5278-84ef-33aa0b95eb7c",
+      "name": "Media permalink",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTION_BASE }}/databases/{{ $env.NOTION_DATABASE_ID }}/query",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.NOTION_TOKEN }}"
+            },
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { page_size: 100 } }}"
+      },
+      "id": "e42d3a37-0724-564a-b352-13806e43cf42",
+      "name": "Notion rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick the rule for this comment. Rows come from the Notion query; permalink from Graph.\n// Shared helpers are inlined into each Code node by build.py (n8n Code nodes cannot import local files).\nconst NOTION_TXT = (p) => !p ? '' : ((p.title || p.rich_text || []).map(x => x.plain_text || '').join(''));\nconst PARSE_RULE = (page) => {\n  const p = page.properties || {};\n  return {\n    id: page.id,\n    media_id: NOTION_TXT(p['Media ID']).trim(),\n    post_url: (p['Post URL'] && p['Post URL'].url) || '',\n    keyword: NOTION_TXT(p['Keyword']).trim(),\n    replies: [1, 2, 3].map(i => NOTION_TXT(p['Reply ' + i]).trim()).filter(Boolean),\n    dm_text: NOTION_TXT(p['DM']),\n    require_follow: !!(p['Require follow'] && p['Require follow'].checkbox),\n    active: p['Active'] ? !!p['Active'].checkbox : true,\n  };\n};\nconst SHORTCODE = (u) => { const m = /\\/(?:p|reel|reels|tv)\\/([^\\/?#]+)/.exec(u || ''); return m ? m[1] : ''; };\nconst FOLLOW_PROMPT = (rule_id, first) => ({\n  text: first ? 'Thanks for commenting! Follow this account first, then tap the button and I will send it.'\n              : 'I cannot see the follow yet. Follow the account, wait a few seconds, then tap again.',\n  quick_replies: [{ content_type: 'text', title: 'I followed', payload: 'CF_FOLLOWED:' + rule_id }],\n});\n\nconst ev = $('Split events').item.json;\nconst permalink = ($('Media permalink').item.json.permalink) || '';\nconst rows = ($('Notion rules').first().json.results || []).map(PARSE_RULE).filter(r => r.active);\nconst code = SHORTCODE(permalink);\nconst rule = rows.find(r => {\n  const hit = (r.media_id && r.media_id === ev.media_id) || (code && SHORTCODE(r.post_url) === code);\n  return hit && (!r.keyword || ev.text.toLowerCase().includes(r.keyword.toLowerCase()));\n});\nif (!rule) return [];\nconst reply = rule.replies.length ? rule.replies[Math.floor(Math.random() * rule.replies.length)] : '';\nconst private_body = rule.require_follow ? FOLLOW_PROMPT(rule.id, true) : { text: rule.dm_text };\nreturn [{ json: { ...ev, rule_id: rule.id, reply, private_body, require_follow: rule.require_follow } }];\n"
+      },
+      "id": "d548569c-4ea1-59f0-9df1-b53c5f91b890",
+      "name": "Match rule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/comments?on_conflict=comment_id",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { comment_id: $json.comment_id, igsid: $json.igsid, username: $json.username, rule_id: $json.rule_id } }}"
+      },
+      "id": "fc58185f-2e67-50bc-a6d8-7b994c3f619c",
+      "name": "Claim comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IG_GRAPH_BASE }}/{{ $('Match rule').item.json.comment_id }}/replies",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.IG_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { message: $('Match rule').item.json.reply } }}"
+      },
+      "id": "5d710595-88e6-5cf1-ae81-f739c60fb171",
+      "name": "Public reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IG_GRAPH_BASE }}/{{ $env.IG_ID }}/messages",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.IG_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { recipient: { comment_id: $('Match rule').item.json.comment_id }, message: $('Match rule').item.json.private_body } }}"
+      },
+      "id": "64133de3-2468-55dc-b447-4b240323358e",
+      "name": "Private reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { kind: $('Match rule').item.json.require_follow ? 'follow_prompt' : 'dm_sent', comment_id: $('Match rule').item.json.comment_id, igsid: $('Match rule').item.json.igsid, username: $('Match rule').item.json.username, rule_id: $('Match rule').item.json.rule_id, detail: $json.error ? JSON.stringify($json.error).slice(0, 300) : '' } }}"
+      },
+      "id": "a358ff0d-543c-5747-9310-c63cf22a3ea8",
+      "name": "Log comment event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.NOTION_BASE }}/pages/{{ $json.rule_id }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.NOTION_TOKEN }}"
+            },
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        }
+      },
+      "id": "6de86970-0944-5412-9b75-7faef0f76472",
+      "name": "Notion rule page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared helpers are inlined into each Code node by build.py (n8n Code nodes cannot import local files).\nconst NOTION_TXT = (p) => !p ? '' : ((p.title || p.rich_text || []).map(x => x.plain_text || '').join(''));\nconst PARSE_RULE = (page) => {\n  const p = page.properties || {};\n  return {\n    id: page.id,\n    media_id: NOTION_TXT(p['Media ID']).trim(),\n    post_url: (p['Post URL'] && p['Post URL'].url) || '',\n    keyword: NOTION_TXT(p['Keyword']).trim(),\n    replies: [1, 2, 3].map(i => NOTION_TXT(p['Reply ' + i]).trim()).filter(Boolean),\n    dm_text: NOTION_TXT(p['DM']),\n    require_follow: !!(p['Require follow'] && p['Require follow'].checkbox),\n    active: p['Active'] ? !!p['Active'].checkbox : true,\n  };\n};\nconst SHORTCODE = (u) => { const m = /\\/(?:p|reel|reels|tv)\\/([^\\/?#]+)/.exec(u || ''); return m ? m[1] : ''; };\nconst FOLLOW_PROMPT = (rule_id, first) => ({\n  text: first ? 'Thanks for commenting! Follow this account first, then tap the button and I will send it.'\n              : 'I cannot see the follow yet. Follow the account, wait a few seconds, then tap again.',\n  quick_replies: [{ content_type: 'text', title: 'I followed', payload: 'CF_FOLLOWED:' + rule_id }],\n});\n\nconst ev = $('Split events').item.json;\nconst rule = PARSE_RULE($input.first().json);\nreturn [{ json: { ...ev, rule_id: rule.id, dm_text: rule.dm_text } }];\n"
+      },
+      "id": "c1fb129e-cd22-5532-bd79-34f1d21b6130",
+      "name": "Tap rule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.IG_GRAPH_BASE }}/{{ $json.igsid }}?fields=is_user_follow_business",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.IG_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "ae23e9ef-fc30-5608-98b2-2a5cb187c436",
+      "name": "Follow check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        420
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared helpers are inlined into each Code node by build.py (n8n Code nodes cannot import local files).\nconst NOTION_TXT = (p) => !p ? '' : ((p.title || p.rich_text || []).map(x => x.plain_text || '').join(''));\nconst PARSE_RULE = (page) => {\n  const p = page.properties || {};\n  return {\n    id: page.id,\n    media_id: NOTION_TXT(p['Media ID']).trim(),\n    post_url: (p['Post URL'] && p['Post URL'].url) || '',\n    keyword: NOTION_TXT(p['Keyword']).trim(),\n    replies: [1, 2, 3].map(i => NOTION_TXT(p['Reply ' + i]).trim()).filter(Boolean),\n    dm_text: NOTION_TXT(p['DM']),\n    require_follow: !!(p['Require follow'] && p['Require follow'].checkbox),\n    active: p['Active'] ? !!p['Active'].checkbox : true,\n  };\n};\nconst SHORTCODE = (u) => { const m = /\\/(?:p|reel|reels|tv)\\/([^\\/?#]+)/.exec(u || ''); return m ? m[1] : ''; };\nconst FOLLOW_PROMPT = (rule_id, first) => ({\n  text: first ? 'Thanks for commenting! Follow this account first, then tap the button and I will send it.'\n              : 'I cannot see the follow yet. Follow the account, wait a few seconds, then tap again.',\n  quick_replies: [{ content_type: 'text', title: 'I followed', payload: 'CF_FOLLOWED:' + rule_id }],\n});\n\nconst t = $('Tap rule').item.json;\nconst follows = !!$input.first().json.is_user_follow_business;\nreturn [{ json: { igsid: t.igsid, rule_id: t.rule_id, follows,\n  dm: follows ? { text: t.dm_text } : FOLLOW_PROMPT(t.rule_id, false),\n  log_kind: follows ? 'dm_sent' : 'follow_missing' } }];\n"
+      },
+      "id": "2de6f8a5-aa3a-5376-a1c1-671f3e692efd",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IG_GRAPH_BASE }}/{{ $env.IG_ID }}/messages",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.IG_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { recipient: { id: $json.igsid }, message: $json.dm } }}"
+      },
+      "id": "555ad255-c294-51be-840a-0619d675cc20",
+      "name": "Send DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        420
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { kind: $('Decide').item.json.log_kind, igsid: $('Decide').item.json.igsid, rule_id: $('Decide').item.json.rule_id } }}"
+      },
+      "id": "d7cc718b-5112-574d-9f57-c9c8f4afe695",
+      "name": "Log tap event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Challenge": {
+      "main": [
+        [
+          {
+            "node": "Respond challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta events (POST)": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature ok": {
+      "main": [
+        [
+          {
+            "node": "OK 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK 200": {
+      "main": [
+        [
+          {
+            "node": "Split events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split events": {
+      "main": [
+        [
+          {
+            "node": "Is comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media permalink": {
+      "main": [
+        [
+          {
+            "node": "Notion rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion rules": {
+      "main": [
+        [
+          {
+            "node": "Match rule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match rule": {
+      "main": [
+        [
+          {
+            "node": "Claim comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim comment": {
+      "main": [
+        [
+          {
+            "node": "Public reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public reply": {
+      "main": [
+        [
+          {
+            "node": "Private reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Private reply": {
+      "main": [
+        [
+          {
+            "node": "Log comment event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is comment": {
+      "main": [
+        [
+          {
+            "node": "Media permalink",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notion rule page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion rule page": {
+      "main": [
+        [
+          {
+            "node": "Tap rule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tap rule": {
+      "main": [
+        [
+          {
+            "node": "Follow check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow check": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Send DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send DM": {
+      "main": [
+        [
+          {
+            "node": "Log tap event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,554 @@
+{
+  "name": "CommentFlow - Facebook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "commentflow-fb",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3606568e-b0bd-5749-98f8-14c65766ea78",
+      "name": "Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "60b697de-857e-58f6-b85f-5a99a6a6d444"
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $input.first().json.query || {};\nconst good = q['hub.mode'] === 'subscribe' && $env.WEBHOOK_VERIFY_TOKEN && q['hub.verify_token'] === $env.WEBHOOK_VERIFY_TOKEN;\nreturn [{ json: { ok: !!good, challenge: good ? String(q['hub.challenge'] || '') : 'forbidden' } }];\n"
+      },
+      "id": "59bb4480-6879-536b-9194-6e754e69444e",
+      "name": "Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 403 }}"
+        }
+      },
+      "id": "d53d7aa6-7a63-59b5-889e-7817a23283de",
+      "name": "Respond challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "commentflow-fb",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "7b56d4e8-8f8a-5b40-b91e-a8db4d9b64d2",
+      "name": "Meta events (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "9300d1ca-172d-5b63-bbe4-0e42e4451675"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify X-Hub-Signature-256 on the raw body, then flatten the payload into events.\nconst crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst sig = headers['x-hub-signature-256'] || '';\nconst secret = $env.META_APP_SECRET || '';\nlet raw;\nif (item.binary && item.binary.data) {\n  raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n} else {\n  raw = Buffer.from(JSON.stringify(item.json.body || {}));\n}\nconst mac = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\nconst a = Buffer.from(mac), b = Buffer.from(sig);\nconst ok = !!secret && a.length === b.length && crypto.timingSafeEqual(a, b);\nlet body = {};\ntry { body = JSON.parse(raw.toString('utf8')); } catch (e) { return [{ json: { ok: false } }]; }\nif (!ok) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, body } }];\n"
+      },
+      "id": "5e9e5d87-b299-5df8-bb77-2d27e5b80321",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0d40d398-9555-5e93-8ea4-994d32778530",
+      "name": "Signature ok",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {
+          "responseCode": "200"
+        }
+      },
+      "id": "35cead9e-228c-5740-a641-e8f3ea1de034",
+      "name": "OK 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "unauthorized",
+        "options": {
+          "responseCode": "401"
+        }
+      },
+      "id": "c4e0f954-b1a6-5c4a-84d8-e376c42a7294",
+      "name": "Unauthorized 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten Facebook Page \"feed\" webhook into new-comment events.\nconst body = $input.first().json.body || {};\nconst page = $env.FB_PAGE_ID || '';\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const ch of entry.changes || []) {\n    const v = ch.value || {};\n    if (ch.field !== 'feed' || v.item !== 'comment' || v.verb !== 'add') continue;\n    const from = v.from || {};\n    if (!v.comment_id || from.id === page) continue;\n    out.push({ json: { kind: 'comment', comment_id: v.comment_id, text: v.message || '', igsid: from.id || '', username: from.name || '', media_id: v.post_id || '' } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "270a35fc-a05d-54c3-a23f-b1337fa5d191",
+      "name": "Split events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTION_BASE }}/databases/{{ $env.NOTION_DATABASE_ID }}/query",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.NOTION_TOKEN }}"
+            },
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { page_size: 100 } }}"
+      },
+      "id": "707ef402-acd0-523a-827c-06f3ca8f20be",
+      "name": "Notion rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Facebook has no documented follow check. A rule with require_follow is NOT sent (fails closed);\n// the workflow logs it as blocked_require_follow and sends nothing.\n// Shared helpers are inlined into each Code node by build.py (n8n Code nodes cannot import local files).\nconst NOTION_TXT = (p) => !p ? '' : ((p.title || p.rich_text || []).map(x => x.plain_text || '').join(''));\nconst PARSE_RULE = (page) => {\n  const p = page.properties || {};\n  return {\n    id: page.id,\n    media_id: NOTION_TXT(p['Media ID']).trim(),\n    post_url: (p['Post URL'] && p['Post URL'].url) || '',\n    keyword: NOTION_TXT(p['Keyword']).trim(),\n    replies: [1, 2, 3].map(i => NOTION_TXT(p['Reply ' + i]).trim()).filter(Boolean),\n    dm_text: NOTION_TXT(p['DM']),\n    require_follow: !!(p['Require follow'] && p['Require follow'].checkbox),\n    active: p['Active'] ? !!p['Active'].checkbox : true,\n  };\n};\nconst SHORTCODE = (u) => { const m = /\\/(?:p|reel|reels|tv)\\/([^\\/?#]+)/.exec(u || ''); return m ? m[1] : ''; };\nconst FOLLOW_PROMPT = (rule_id, first) => ({\n  text: first ? 'Thanks for commenting! Follow this account first, then tap the button and I will send it.'\n              : 'I cannot see the follow yet. Follow the account, wait a few seconds, then tap again.',\n  quick_replies: [{ content_type: 'text', title: 'I followed', payload: 'CF_FOLLOWED:' + rule_id }],\n});\n\nconst ev = $('Split events').item.json;\nconst rows = ($input.first().json.results || []).map(PARSE_RULE).filter(r => r.active);\nconst rule = rows.find(r => r.media_id && (r.media_id === ev.media_id || ev.media_id.endsWith('_' + r.media_id))\n  && (!r.keyword || ev.text.toLowerCase().includes(r.keyword.toLowerCase())));\nif (!rule) return [];\nconst reply = rule.replies.length ? rule.replies[Math.floor(Math.random() * rule.replies.length)] : '';\nreturn [{ json: { ...ev, rule_id: rule.id, reply, private_body: { text: rule.dm_text }, require_follow: rule.require_follow } }];\n"
+      },
+      "id": "4cd1b436-33e1-5804-b650-c93cf4c0c7f7",
+      "name": "Match rule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/comments?on_conflict=comment_id",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { comment_id: $json.comment_id, igsid: $json.igsid, username: $json.username, rule_id: $json.rule_id } }}"
+      },
+      "id": "b7e1782a-141a-526c-90c8-e77ed31708ea",
+      "name": "Claim comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GRAPH_BASE }}/{{ $('Match rule').item.json.comment_id }}/comments",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { message: $('Match rule').item.json.reply } }}"
+      },
+      "id": "27d133e9-c52e-5ec4-8404-9a4c1ed624d5",
+      "name": "Public reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GRAPH_BASE }}/{{ $env.FB_PAGE_ID }}/messages",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { recipient: { comment_id: $('Match rule').item.json.comment_id }, message: $('Match rule').item.json.private_body } }}"
+      },
+      "id": "bb527f9e-0635-51d2-b117-7ad0b0cb1686",
+      "name": "Private reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { kind: 'dm_sent', comment_id: $('Match rule').item.json.comment_id, igsid: $('Match rule').item.json.igsid, username: $('Match rule').item.json.username, rule_id: $('Match rule').item.json.rule_id, detail: $json.error ? JSON.stringify($json.error).slice(0, 250) : '' } }}"
+      },
+      "id": "d8405eca-20fd-589c-976b-b008cd64de5f",
+      "name": "Log event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ !$json.require_follow }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7314ac74-340a-563a-843f-0d983a2a6505",
+      "name": "Campaign enabled",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1690,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { kind: 'blocked_require_follow', comment_id: $json.comment_id, igsid: $json.igsid, username: $json.username, rule_id: $json.rule_id, detail: 'Facebook has no documented follow check; nothing was sent' } }}"
+      },
+      "id": "7e93704f-b779-5968-8482-a009d94a9bea",
+      "name": "Log blocked (follow required)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1950,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Challenge": {
+      "main": [
+        [
+          {
+            "node": "Respond challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta events (POST)": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature ok": {
+      "main": [
+        [
+          {
+            "node": "OK 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK 200": {
+      "main": [
+        [
+          {
+            "node": "Split events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split events": {
+      "main": [
+        [
+          {
+            "node": "Notion rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion rules": {
+      "main": [
+        [
+          {
+            "node": "Match rule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match rule": {
+      "main": [
+        [
+          {
+            "node": "Campaign enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim comment": {
+      "main": [
+        [
+          {
+            "node": "Public reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public reply": {
+      "main": [
+        [
+          {
+            "node": "Private reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Private reply": {
+      "main": [
+        [
+          {
+            "node": "Log event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign enabled": {
+      "main": [
+        [
+          {
+            "node": "Claim comment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log blocked (follow required)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

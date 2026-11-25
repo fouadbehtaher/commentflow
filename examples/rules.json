@@ -1,0 +1,11 @@
+[
+  {
+    "id": "demo-post",
+    "media_id": "17900000000000001",
+    "keyword": "guide",
+    "replies": ["Sent! Check your DMs.", "On its way, check your inbox.", "Done, look in your messages."],
+    "dm_text": "Here is the guide: https://example.com/guide",
+    "require_follow": true,
+    "active": true
+  }
+]
